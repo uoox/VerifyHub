@@ -1,0 +1,34 @@
+# Gradle
+.gradle/
+build/
+**/build/
+gradle-app.setting
+!gradle-wrapper.jar
+!gradle-wrapper.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+
+# Local config (paths, keystores)
+local.properties
+keystore.properties
+*.jks
+*.keystore
+
+# Generated files
+.cxx/
+*.apk
+*.aab
+*.aar
+*.dex
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# KSP / Room schemas generated outside source
+# (we DO check in schemas if exportSchema=true; keep room-generated dir)

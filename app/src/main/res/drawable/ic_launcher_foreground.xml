@@ -1,0 +1,41 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Shield body (filled white) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,28 L80,36 L80,58
+                          C80,72 70,82 54,88
+                          C38,82 28,72 28,58
+                          L28,36 Z" />
+
+    <!-- Inner accent ring -->
+    <path
+        android:fillColor="#E0EAFB"
+        android:pathData="M54,32 L76,39 L76,58
+                          C76,70 67.5,78.5 54,84
+                          C40.5,78.5 32,70 32,58
+                          L32,39 Z" />
+
+    <!-- Check mark stroke -->
+    <path
+        android:strokeColor="#1E40AF"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M40,58 L50,68 L68,48" />
+
+    <!-- Three OTP dots above the shield -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M44,22 m-2.5,0 a2.5,2.5 0 1 0 5,0 a2.5,2.5 0 1 0 -5,0" />
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M54,22 m-2.5,0 a2.5,2.5 0 1 0 5,0 a2.5,2.5 0 1 0 -5,0" />
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M64,22 m-2.5,0 a2.5,2.5 0 1 0 5,0 a2.5,2.5 0 1 0 -5,0" />
+</vector>

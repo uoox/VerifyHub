@@ -1,0 +1,21 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Deep blue base -->
+    <path
+        android:fillColor="#1E3A8A"
+        android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
+
+    <!-- Slightly lighter band, gives a subtle "from top-left" sheen -->
+    <path
+        android:fillColor="#1E40AF"
+        android:pathData="M0,0 L108,0 L108,55 L0,108 Z" />
+
+    <!-- Soft highlight at top -->
+    <path
+        android:fillColor="#2A4FB8"
+        android:pathData="M0,0 L108,0 L108,18 L0,40 Z" />
+</vector>
