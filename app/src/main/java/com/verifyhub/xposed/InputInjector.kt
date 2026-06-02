@@ -2,7 +2,6 @@ package com.verifyhub.xposed
 
 import android.content.Context
 import android.hardware.input.InputManager
-import android.os.SystemClock
 import android.view.InputDevice
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
@@ -24,11 +23,22 @@ import android.view.KeyEvent
  */
 object InputInjector {
 
-    /** 调用前需先在 system_server 进程里完成至少一次 hook 初始化。 */
-    fun sendText(context: Context?, text: String): Boolean {
+    /**
+     * 把 [text] 一字符一字符地注入到当前焦点框。
+     *
+     * 关于注入入口的演变：
+     *   - Android ≤ 13: `InputManager.injectInputEvent(InputEvent, int)` 可反射
+     *   - Android 14+: 该方法被搬到 `android.hardware.input.InputManagerGlobal`，
+     *     `InputManager` 上的同名方法被删/隐藏。这里通过 [Injector] 自适应。
+     *
+     * 关于 per-char delay：很多网站/App（GitHub、Apple ID、Google 等）把 OTP 输入
+     * 做成 6 个独立格子，每格只接一位、onChange 时 focus 自动跳到下一格。一口气
+     * 派完会丢字，所以每位之间插 [perCharDelayMs] 毫秒空档。
+     */
+    fun sendText(context: Context?, text: String, perCharDelayMs: Long = 100L): Boolean {
         if (text.isEmpty()) return false
-        val im = resolveInputManager(context) ?: run {
-            Logger.w("InputInjector: InputManager unavailable")
+        val inj = Injector.resolve(context) ?: run {
+            Logger.w("InputInjector: no usable injectInputEvent method found on this Android")
             return false
         }
         val kcm = try {
@@ -36,66 +46,109 @@ object InputInjector {
         } catch (t: Throwable) {
             Logger.w("InputInjector: KeyCharacterMap.load failed", t); return false
         }
-        val events: Array<KeyEvent>? = kcm.getEvents(text.toCharArray())
-        if (events.isNullOrEmpty()) {
-            Logger.w("InputInjector: no KeyEvents for text (unprintable chars?)")
-            return false
-        }
-        val mode = injectModeConstant() ?: return false
         var ok = true
-        for (e in events) {
-            val src = if (e.source != InputDevice.SOURCE_KEYBOARD) {
-                KeyEvent(e).apply { source = InputDevice.SOURCE_KEYBOARD }
-            } else e
-            ok = injectOne(im, src, mode) && ok
+        text.forEachIndexed { idx, ch ->
+            val events: Array<KeyEvent>? = kcm.getEvents(charArrayOf(ch))
+            if (events.isNullOrEmpty()) {
+                Logger.w("InputInjector: no KeyEvents for '$ch'")
+                ok = false
+                return@forEachIndexed
+            }
+            for (e in events) {
+                val src = if (e.source != InputDevice.SOURCE_KEYBOARD) {
+                    KeyEvent(e).apply { source = InputDevice.SOURCE_KEYBOARD }
+                } else e
+                ok = inj.inject(src) && ok
+            }
+            if (idx < text.length - 1 && perCharDelayMs > 0) {
+                try { Thread.sleep(perCharDelayMs) } catch (_: InterruptedException) {}
+            }
         }
         return ok
     }
 
     /**
-     * 找到当前进程的 InputManager 实例。Android 14 起 `getInstance()` 不可
-     * 见，所以优先用 Context 系统服务；Context 拿不到再回退到反射。
+     * 实际反射调用 injectInputEvent 的绑定。第一次成功调用后缓存 receiver + Method。
+     * 三条候选路径：
+     *   1) InputManagerGlobal.getInstance().injectInputEvent(InputEvent, int)  ← Android 14+
+     *   2) InputManager.injectInputEvent(InputEvent, int)                       ← Android ≤ 13
+     *   3) InputManager.injectInputEvent(InputEvent)                            ← 极个别版本
      */
-    private fun resolveInputManager(ctx: Context?): InputManager? {
-        if (ctx != null) {
-            val svc = ctx.getSystemService(Context.INPUT_SERVICE)
-            if (svc is InputManager) return svc
-        }
-        return try {
-            val m = InputManager::class.java.getDeclaredMethod("getInstance")
-            m.isAccessible = true
-            m.invoke(null) as? InputManager
+    private class Injector(
+        private val receiver: Any,
+        private val method: java.lang.reflect.Method,
+        private val mode: Int?,
+    ) {
+        fun inject(event: KeyEvent): Boolean = try {
+            val result = if (mode != null) method.invoke(receiver, event, mode)
+                         else method.invoke(receiver, event)
+            (result as? Boolean) ?: true
         } catch (t: Throwable) {
-            Logger.w("InputInjector: reflective getInstance failed", t); null
+            Logger.w("InputInjector: inject failed keyCode=${event.keyCode}", t); false
         }
-    }
 
-    private fun injectModeConstant(): Int? = try {
-        val f = InputManager::class.java.getDeclaredField("INJECT_INPUT_EVENT_MODE_WAIT_FOR_FINISH")
-        f.isAccessible = true
-        f.getInt(null)
-    } catch (t: Throwable) {
-        Logger.w("InputInjector: cannot read INJECT_INPUT_EVENT_MODE_WAIT_FOR_FINISH", t); null
-    }
+        companion object {
+            @Volatile private var cached: Injector? = null
 
-    private fun injectOne(im: InputManager, event: KeyEvent, mode: Int): Boolean = try {
-        val m = InputManager::class.java.getDeclaredMethod(
-            "injectInputEvent", KeyEvent::class.java, Int::class.javaPrimitiveType
-        )
-        m.isAccessible = true
-        m.invoke(im, event, mode) as? Boolean ?: true
-    } catch (t: Throwable) {
-        Logger.w("InputInjector: injectInputEvent failed for keyCode=${event.keyCode}", t)
-        false
-    }
+            fun resolve(ctx: Context?): Injector? {
+                cached?.let { return it }
+                synchronized(this) {
+                    cached?.let { return it }
+                    val found = tryInputManagerGlobal() ?: tryInputManager(ctx)
+                    if (found != null) {
+                        cached = found
+                        Logger.i("InputInjector: bound to ${found.receiver.javaClass.simpleName}.${found.method.name}(${found.method.parameterTypes.size} args)")
+                    }
+                    return found
+                }
+            }
 
-    /** 方便从其它进程触发的"睡 X 毫秒再注入"包装。 */
-    fun sendTextDelayed(context: Context?, text: String, delayMs: Long): Boolean {
-        if (delayMs <= 0) return sendText(context, text)
-        val start = SystemClock.uptimeMillis()
-        while (SystemClock.uptimeMillis() - start < delayMs) {
-            try { Thread.sleep(50) } catch (_: InterruptedException) {}
+            private fun tryInputManagerGlobal(): Injector? = runCatching {
+                val cls = Class.forName("android.hardware.input.InputManagerGlobal")
+                val getInstance = cls.getDeclaredMethod("getInstance").apply { isAccessible = true }
+                val instance = getInstance.invoke(null) ?: return@runCatching null
+                resolveOn(cls, instance)
+            }.getOrNull()
+
+            private fun tryInputManager(ctx: Context?): Injector? = runCatching {
+                val im = ctx?.getSystemService(Context.INPUT_SERVICE) as? InputManager
+                    ?: InputManager::class.java.getDeclaredMethod("getInstance").apply {
+                        isAccessible = true
+                    }.invoke(null) as? InputManager
+                    ?: return@runCatching null
+                resolveOn(InputManager::class.java, im)
+            }.getOrNull()
+
+            private fun resolveOn(cls: Class<*>, receiver: Any): Injector? {
+                val mode = readMode(cls) ?: readMode(InputManager::class.java)
+                // 优先 (InputEvent, int)，回退 (InputEvent)
+                val twoArg = cls.declaredMethods.firstOrNull {
+                    it.name == "injectInputEvent" &&
+                        it.parameterTypes.size == 2 &&
+                        android.view.InputEvent::class.java.isAssignableFrom(it.parameterTypes[0]) &&
+                        it.parameterTypes[1] == Int::class.javaPrimitiveType
+                }
+                if (twoArg != null) {
+                    twoArg.isAccessible = true
+                    return Injector(receiver, twoArg, mode ?: 2 /* WAIT_FOR_FINISH */)
+                }
+                val oneArg = cls.declaredMethods.firstOrNull {
+                    it.name == "injectInputEvent" &&
+                        it.parameterTypes.size == 1 &&
+                        android.view.InputEvent::class.java.isAssignableFrom(it.parameterTypes[0])
+                }
+                if (oneArg != null) {
+                    oneArg.isAccessible = true
+                    return Injector(receiver, oneArg, null)
+                }
+                return null
+            }
+
+            private fun readMode(cls: Class<*>): Int? = try {
+                val f = cls.getDeclaredField("INJECT_INPUT_EVENT_MODE_WAIT_FOR_FINISH")
+                f.isAccessible = true
+                f.getInt(null)
+            } catch (_: Throwable) { null }
         }
-        return sendText(context, text)
     }
 }

@@ -25,16 +25,10 @@ object HistoryUploader {
         if (context == null || body.isNullOrBlank()) return null
         val hit = CodeExtractor.extract(body, subject) ?: return null
 
-        // 1) 剪贴板：始终写
-        try {
-            val cm = context.getSystemService(android.content.ClipboardManager::class.java)
-            val clip = android.content.ClipData.newPlainText("VerifyHub", hit.value)
-            cm?.setPrimaryClip(clip)
-        } catch (t: Throwable) {
-            Logger.w("clipboard write failed", t)
-        }
-
-        // 2) 落库 + 广播
+        // 落库（HistoryProvider 内会做去重、Toast、广播 ACTION_NEW_CODE）。
+        // 剪贴板写入挪到 system_server 的 SystemAutoFillHook 里完成——它有 uid 1000
+        // 的特权可绕过 ClipboardService 的前台校验；hook 进程（radio / Gmail / Outlook）
+        // 都没有这个特权，强行写会拿到 SecurityException。
         try {
             val cv = ContentValues().apply {
                 put(HistoryProvider.COL_VALUE, hit.value)
@@ -46,7 +40,7 @@ object HistoryUploader {
             }
             context.contentResolver.insert(HistoryProvider.URI, cv)
         } catch (t: Throwable) {
-            Logger.w("history insert failed (manager app not installed?)", t)
+            Logger.w("history insert failed", t)
         }
         Logger.i("captured ${hit.kind} '${hit.value.redact()}' from ${source.name}")
         return hit

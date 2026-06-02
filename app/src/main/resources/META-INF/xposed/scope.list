@@ -1,4 +1,5 @@
 android
+com.android.phone
 com.android.providers.telephony
 com.google.android.gm
 com.microsoft.office.outlook

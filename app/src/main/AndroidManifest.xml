@@ -34,13 +34,8 @@
             android:name=".data.HistoryProvider"
             android:authorities="com.verifyhub.provider"
             android:exported="true"
-            android:grantUriPermissions="false"
-            android:permission="com.verifyhub.permission.WRITE_HISTORY" />
+            android:grantUriPermissions="false" />
 
     </application>
-
-    <permission
-        android:name="com.verifyhub.permission.WRITE_HISTORY"
-        android:protectionLevel="signature" />
 
 </manifest>

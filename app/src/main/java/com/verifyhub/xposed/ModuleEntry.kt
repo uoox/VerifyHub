@@ -2,8 +2,8 @@ package com.verifyhub.xposed
 
 import com.verifyhub.data.Source
 import com.verifyhub.xposed.hooks.NotificationHook
+import com.verifyhub.xposed.hooks.PhoneBroadcastHook
 import com.verifyhub.xposed.hooks.SmsHook
-import com.verifyhub.xposed.hooks.SystemAutoFillHook
 import com.verifyhub.xposed.hooks.TelephonyProviderHook
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
@@ -18,8 +18,7 @@ import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
  */
 class ModuleEntry : XposedModule() {
 
-    private val settings by lazy { HookSettings(this) }
-    private val autoFillHook by lazy { SystemAutoFillHook(settings) }
+    val phoneHook by lazy { PhoneBroadcastHook() }
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         Logger.xposed = this
@@ -32,9 +31,14 @@ class ModuleEntry : XposedModule() {
         Logger.i("onPackageLoaded ${param.packageName}")
 
         when (param.packageName) {
-            "android" -> {
-                SmsHook(this).install(param)
-                autoFillHook.install(param)
+            "com.android.phone" -> {
+                // 这个进程是大本营：
+                //   - SmsHook: 抓 InboundSmsHandler.dispatchIntent；同进程直接 sideEffects
+                //   - PhoneBroadcastHook: 监听 ACTION_NEW_CODE 给邮件路径用（NotificationHook
+                //     在 Gmail/Outlook 进程，没权限，必须靠跨进程广播让我们这边来做）
+                //   平台签名 system app，UID=1001，自带 INJECT_EVENTS / WRITE_SMS 等。
+                phoneHook.install(param)
+                SmsHook(this, phoneHook).install(param)
             }
 
             "com.android.providers.telephony" -> {
