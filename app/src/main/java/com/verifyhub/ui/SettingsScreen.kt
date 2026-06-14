@@ -67,6 +67,23 @@ fun SettingsScreen(onBack: () -> Unit) {
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
+                    Text("提取测试", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "首页右上角「🧪」进入测试页：\n" +
+                            "• 把没被正确识别的短信 / 邮件原文粘进去，点「提取」即可看到\n" +
+                            "  命中了哪些关键词、有哪些候选码、各自得分、最终选了谁。\n" +
+                            "• 若识别有误，点「复制诊断报告」把报告发给维护者，\n" +
+                            "  即可据此调整匹配规则后在下次更新里修复。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
+            Card(shape = RoundedCornerShape(16.dp)) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     Text("作用范围", style = MaterialTheme.typography.titleSmall)
                     Text(
                         "需要在 LSPosed Manager 里启用作用域：\n" +

@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -52,7 +53,7 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HistoryScreen(onOpenSettings: () -> Unit) {
+fun HistoryScreen(onOpenSettings: () -> Unit, onOpenTest: () -> Unit) {
     val ctx = LocalContext.current
     val dao = remember(ctx) { AppDatabase.get(ctx).codeRecords() }
     val records by dao.recent().collectAsState(initial = emptyList())
@@ -67,6 +68,9 @@ fun HistoryScreen(onOpenSettings: () -> Unit) {
                         IconButton(onClick = { scope.launch { dao.clear() } }) {
                             Icon(Icons.Filled.DeleteSweep, contentDescription = "清空")
                         }
+                    }
+                    IconButton(onClick = onOpenTest) {
+                        Icon(Icons.Filled.Science, contentDescription = "提取测试")
                     }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = "设置")

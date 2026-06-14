@@ -11,10 +11,16 @@ fun VerifyHubApp() {
         val nav = rememberNavController()
         NavHost(navController = nav, startDestination = "history") {
             composable("history") {
-                HistoryScreen(onOpenSettings = { nav.navigate("settings") })
+                HistoryScreen(
+                    onOpenSettings = { nav.navigate("settings") },
+                    onOpenTest = { nav.navigate("test") },
+                )
             }
             composable("settings") {
                 SettingsScreen(onBack = { nav.popBackStack() })
+            }
+            composable("test") {
+                TestScreen(onBack = { nav.popBackStack() })
             }
         }
     }
