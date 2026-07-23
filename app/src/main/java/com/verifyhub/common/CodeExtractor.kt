@@ -138,10 +138,15 @@ object CodeExtractor {
         RegexOption.IGNORE_CASE
     )
 
+    // 链接通道命中词。只保留「几乎必然是验证/魔法链接」的词。
+    // 刻意剔除了 auth / secure / account / reset / login 这类过宽的词：它们大量出现在
+    // 普通营销/账户管理邮件的 URL 里（secure.x.com、/my-account、/reset-password…），
+    // 一旦误命中，邮件通道会把这封正常邮件当成验证链接并「划掉它的通知」，代价很大。
+    // 需要覆盖某站点的登录魔法链接时，宁可在此按域名/路径精确补充，也不放宽泛词。
     private val LINK_VERIFY_HINTS = listOf(
         "verify", "verification", "confirm", "confirmation", "activate", "activation",
-        "magic", "magiclink", "signin", "sign-in", "login", "log-in", "authenticate",
-        "auth", "validate", "validation", "reset", "token", "otp", "secure", "account",
+        "magic", "magiclink", "signin", "sign-in", "authenticate",
+        "validate", "validation", "token", "otp", "verifyemail", "verify-email",
     )
 
     fun extract(body: String?, subject: String? = null): Hit? = diagnose(body, subject).hit

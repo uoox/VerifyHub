@@ -7,11 +7,14 @@ import com.verifyhub.data.HistoryProvider
 import com.verifyhub.data.Source
 
 /**
- * Hook 进程统一的"我抓到一条验证码"出口。负责：
- *   - 跑提取器
- *   - 写剪贴板
- *   - 通过 HistoryProvider 落库（顺带触发 ACTION_NEW_CODE 广播，让
- *     SystemAutoFillHook 接到后注入按键）
+ * Hook 进程统一的"我抓到一条验证码"出口。只做两件事：
+ *   - 跑提取器 [CodeExtractor]
+ *   - 通过 [HistoryProvider] 落库（provider 内部做去重，并对「非 SMS」来源
+ *     广播 ACTION_NEW_CODE 让 com.android.phone 的 [PhoneBroadcastHook] 执行副作用）
+ *
+ * 剪贴板 / Toast / 按键注入都不在这里做——本函数运行在 radio / Gmail / Outlook
+ * 等进程，普通 app 权限不足或前台受限；这些副作用统一由 com.android.phone 进程的
+ * [PhoneBroadcastHook.sideEffects] 完成（SMS 路径同进程直调，邮件路径走广播）。
  */
 object HistoryUploader {
 

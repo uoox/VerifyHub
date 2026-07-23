@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.SystemClock
 import android.widget.Toast
 import com.verifyhub.common.CodeExtractor
 import com.verifyhub.data.HistoryProvider
@@ -29,6 +30,20 @@ class PhoneBroadcastHook {
     private var receiverInstalled = false
     private val worker by lazy {
         HandlerThread("VerifyHubPhone").apply { start() }.let { Handler(it.looper) }
+    }
+
+    // 副作用去重状态：最近一次执行副作用的值及其时刻（elapsedRealtime）。
+    private var lastValue: String? = null
+    private var lastValueAt: Long = 0L
+
+    /** @return true 表示这次可以执行副作用；false 表示与最近一次重复，应跳过。 */
+    @Synchronized
+    private fun claimOnce(value: String): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (value == lastValue && now - lastValueAt < DEDUPE_SIDE_EFFECT_MS) return false
+        lastValue = value
+        lastValueAt = now
+        return true
     }
 
     fun install(param: PackageLoadedParam) {
@@ -55,7 +70,17 @@ class PhoneBroadcastHook {
     private fun register(ctx: Context) {
         try {
             val filter = IntentFilter(HistoryProvider.ACTION_NEW_CODE)
-            ctx.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+            // 必须 EXPORTED：发送方 com.verifyhub 与本进程 com.android.phone 是不同 UID。
+            // 但裸 EXPORTED 会让任意应用广播 ACTION_NEW_CODE，从这个 uid=1001 特权进程
+            // 触发剪贴板写入与「按键注入」——等于把任意文本打进当前输入框。用签名级
+            // 权限把发送方限定为持有本模块签名的 com.verifyhub 自己。
+            ctx.registerReceiver(
+                receiver,
+                filter,
+                HistoryProvider.PERMISSION_NEW_CODE,
+                null,
+                Context.RECEIVER_EXPORTED,
+            )
             receiverInstalled = true
             Logger.i("PhoneBroadcastHook: receiver registered in com.android.phone")
         } catch (t: Throwable) {
@@ -90,6 +115,15 @@ class PhoneBroadcastHook {
      * 取消开关。LINK 永远不注入，避免把 https://... 当按键打进输入框。
      */
     fun sideEffects(ctx: Context, value: String, kind: String) {
+        // 去重：同一条 SMS 会两次经过 InboundSmsHandler.dispatchIntent（SMS_DELIVER 与
+        // SMS_RECEIVED），个别 OEM 子类重写 dispatchIntent 并 super 调用还会再多一次；
+        // 邮件路径的广播偶尔也会重投。这些都会让 sideEffects 被重复调用，导致 Toast
+        // 弹两次、验证码被向输入框注入两遍（OTP 直接被打乱）。这里按「值 + 时间窗」
+        // 折叠掉重复调用，是覆盖所有重复来源的兜底。
+        if (!claimOnce(value)) {
+            Logger.i("sideEffects: skip duplicate within ${DEDUPE_SIDE_EFFECT_MS}ms len=${value.length}")
+            return
+        }
         Logger.i("sideEffects entered len=${value.length} kind=$kind")
 
         // 1) 剪贴板：UID 1001 的 system app 没有前台限制
@@ -122,5 +156,10 @@ class PhoneBroadcastHook {
         app?.applicationContext
     } catch (t: Throwable) {
         null
+    }
+
+    private companion object {
+        /** 同一个值在此窗口内的重复副作用调用会被跳过，折叠 SMS 的多次派发。 */
+        const val DEDUPE_SIDE_EFFECT_MS = 10_000L
     }
 }

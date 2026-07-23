@@ -4,6 +4,17 @@
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+      保护 ACTION_NEW_CODE 广播（内含明文验证码 + 会触发按键注入）。
+      signature 级：只有以本模块签名签署的应用（即 com.verifyhub 自己）才被授予，
+      第三方应用无法伪造该广播去驱动 com.android.phone 里的注入。
+      同时 uses-permission 让本 App 自身持有它，其发出的广播才能通过接收方校验。
+    -->
+    <permission
+        android:name="com.verifyhub.permission.NEW_CODE"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="com.verifyhub.permission.NEW_CODE" />
+
     <queries>
         <package android:name="com.google.android.gm" />
         <package android:name="com.microsoft.office.outlook" />

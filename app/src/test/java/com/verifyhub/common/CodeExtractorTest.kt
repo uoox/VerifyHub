@@ -119,6 +119,26 @@ class CodeExtractorTest {
         assertTrue(hit!!.value.startsWith("https://app.example.com/verify"))
     }
 
+    @Test fun signin_magic_link() {
+        val hit = CodeExtractor.extract("Tap to continue: https://auth.example.com/signin/xyz")
+        assertEquals(CodeExtractor.Kind.LINK, hit?.kind)
+    }
+
+    @Test fun plain_account_link_is_not_a_verification_link() {
+        // 普通账户管理链接（无验证码关键词、无验证语义）不该被当成验证链接，
+        // 否则邮件通道会误划掉这封正常邮件的通知。
+        assertNull(CodeExtractor.extract("Manage your subscription here: https://shop.example.com/my-account/settings"))
+    }
+
+    @Test fun plain_secure_host_link_is_not_a_verification_link() {
+        assertNull(CodeExtractor.extract("Your receipt is ready: https://secure.example.com/orders/8891"))
+    }
+
+    @Test fun password_reset_link_is_not_captured() {
+        // 密码重置链接不是「验证码」，也不该触发通知划除。
+        assertNull(CodeExtractor.extract("Forgot your password? Reset it at https://example.com/reset-password?u=42"))
+    }
+
     // —— 诊断接口 ——
 
     @Test fun diagnose_reports_keyword_and_candidate() {

@@ -59,8 +59,12 @@ class HistoryProvider : ContentProvider() {
             // SMS 路径下，SmsHook 已经在 com.android.phone 同进程里直接调过 sideEffects，
             // 不要再发广播，免得重复（双 Toast、重复注入）。
             if (source != Source.SMS.name) {
+                // 显式定向到 com.android.phone：广播里带着明文验证码，不能让任意
+                // 声明了同 action 的应用截获。接收方还叠加了签名级权限校验（见
+                // PhoneBroadcastHook.register），双重限定收发双方。
                 ctx.sendBroadcast(
                     Intent(ACTION_NEW_CODE).apply {
+                        setPackage("com.android.phone")
                         putExtra(EXTRA_VALUE, value)
                         putExtra(EXTRA_KIND, kind)
                         putExtra(EXTRA_SOURCE, source)
@@ -94,6 +98,8 @@ class HistoryProvider : ContentProvider() {
         const val COL_TIMESTAMP = "timestamp"
 
         const val ACTION_NEW_CODE = "com.verifyhub.action.NEW_CODE"
+        /** 签名级权限，限定 ACTION_NEW_CODE 广播只能由持本模块签名的应用发出。 */
+        const val PERMISSION_NEW_CODE = "com.verifyhub.permission.NEW_CODE"
         const val EXTRA_VALUE = "value"
         const val EXTRA_KIND = "kind"
         const val EXTRA_SOURCE = "source"
