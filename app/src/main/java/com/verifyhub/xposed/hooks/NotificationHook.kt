@@ -67,7 +67,9 @@ class NotificationHook(
         val body = listOfNotNull(bigText, text, sub).firstOrNull { it.isNotBlank() } ?: return
         val ctx = appContext() ?: return
 
-        val hit = HistoryUploader.report(
+        // 邮件 / Voice 路径：本进程（Gmail / Outlook / Voice）看不到本模块的 provider，
+        // 也做不了受限的副作用；把验证码定向广播给 com.android.phone 代办。
+        val hit = HistoryUploader.relayToPhone(
             context = ctx,
             body = body,
             subject = title,

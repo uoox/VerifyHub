@@ -3,10 +3,8 @@ package com.verifyhub.data
 import android.content.ContentProvider
 import android.content.ContentResolver
 import android.content.ContentValues
-import android.content.Intent
 import android.database.Cursor
 import android.net.Uri
-import android.os.SystemClock
 import com.verifyhub.common.CodeExtractor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,10 +15,16 @@ import kotlinx.coroutines.launch
  * Hook 进程把抓到的验证码塞回 Manager App 的入口。Manager UI 直接读 Room；
  * Hook 进程只通过 ContentResolver.insert 写。
  *
- * 这里只做去重 + 落库 + 广播。Toast/剪贴板/自动填充/标已读都挪到
- * `com.android.phone` 进程的 [com.verifyhub.xposed.hooks.PhoneBroadcastHook]
- * 里处理——manager 进程被 OPlus 频繁 freeze 且属于普通 app，做这些副作用要么静默
- * 失败要么权限不够。
+ * 这里只做去重 + 落库。谁来写：
+ *   - SMS 路径：[com.verifyhub.xposed.hooks.SmsHook] 跑在 `com.android.phone`，直接 insert。
+ *     `com.android.phone` 是平台签名 system app，不受 Android 11+ 包可见性过滤，能 acquire
+ *     本 provider。
+ *   - 邮件/Voice 路径：抓取在 Gmail/Outlook/Voice 进程，那些进程受包可见性限制**看不到本包的
+ *     provider**（insert 会抛 `Unknown URL`），所以它们**不**写 provider，而是把验证码定向广播给
+ *     `com.android.phone`，由 [com.verifyhub.xposed.hooks.PhoneBroadcastHook] 代为 insert。
+ *
+ * Toast/剪贴板/自动填充/标已读都挪到 `com.android.phone` 进程的 PhoneBroadcastHook 里处理——
+ * manager 进程被 OPlus 频繁 freeze 且属于普通 app，做这些副作用要么静默失败要么权限不够。
  */
 class HistoryProvider : ContentProvider() {
 
@@ -53,26 +57,6 @@ class HistoryProvider : ContentProvider() {
                     handled = true,
                 )
             )
-
-            // 广播给 com.android.phone 的 PhoneBroadcastHook 用——只为邮件/Voice 路径，
-            // 那些 hook 跑在 Gmail/Outlook/Voice 进程里无法直接做副作用，必须跨进程。
-            // SMS 路径下，SmsHook 已经在 com.android.phone 同进程里直接调过 sideEffects，
-            // 不要再发广播，免得重复（双 Toast、重复注入）。
-            if (source != Source.SMS.name) {
-                // 显式定向到 com.android.phone：广播里带着明文验证码，不能让任意
-                // 声明了同 action 的应用截获。接收方还叠加了签名级权限校验（见
-                // PhoneBroadcastHook.register），双重限定收发双方。
-                ctx.sendBroadcast(
-                    Intent(ACTION_NEW_CODE).apply {
-                        setPackage("com.android.phone")
-                        putExtra(EXTRA_VALUE, value)
-                        putExtra(EXTRA_KIND, kind)
-                        putExtra(EXTRA_SOURCE, source)
-                        putExtra(EXTRA_SENDER, sender)
-                        putExtra(EXTRA_RECEIVED_AT, SystemClock.elapsedRealtime())
-                    }
-                )
-            }
         }
         return Uri.withAppendedPath(URI, "queued")
     }
@@ -98,13 +82,20 @@ class HistoryProvider : ContentProvider() {
         const val COL_TIMESTAMP = "timestamp"
 
         const val ACTION_NEW_CODE = "com.verifyhub.action.NEW_CODE"
-        /** 签名级权限，限定 ACTION_NEW_CODE 广播只能由持本模块签名的应用发出。 */
-        const val PERMISSION_NEW_CODE = "com.verifyhub.permission.NEW_CODE"
+        /**
+         * 定向广播的共享令牌。ACTION_NEW_CODE 由 Gmail/Outlook/Voice 进程（非本模块签名、
+         * 也无法持有签名级权限）发往 `com.android.phone`，因此接收方无法用签名权限限定发送方；
+         * 改为在广播里带上这个编译期内置的令牌 + 显式 `setPackage("com.android.phone")` 定向投递，
+         * 接收方校验令牌后才执行副作用，挡掉第三方 app 伪造广播驱动按键注入 / 截获验证码。
+         * 令牌随 APK 编译进各注入进程（Gmail/Outlook/Voice/phone 都是同一份 APK 的代码），天然一致。
+         */
+        const val IPC_TOKEN = "vh-9f13a7c2-4e8b-4d61-9a2f-7c0e5b3d81aa"
         const val EXTRA_VALUE = "value"
         const val EXTRA_KIND = "kind"
         const val EXTRA_SOURCE = "source"
         const val EXTRA_SENDER = "sender"
-        const val EXTRA_RECEIVED_AT = "receivedAt"
+        const val EXTRA_PREVIEW = "preview"
+        const val EXTRA_TOKEN = "token"
 
         private const val DEDUPE_WINDOW_MS = 30_000L
 

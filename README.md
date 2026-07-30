@@ -52,6 +52,20 @@
 
 ## 版本
 
+- **v0.3.2** — 修复邮件 / Google Voice 抓到验证码却不复制到剪贴板：
+  - 根因：邮件/Voice 的抓取发生在 Gmail / Outlook / Google Voice 进程，这些第三方进程受
+    Android 11+ 包可见性限制**看不到本模块的 `HistoryProvider`**（即便 `exported=true`），
+    `ContentResolver.insert` 会抛 `IllegalArgumentException: Unknown URL`。而触发副作用的
+    `ACTION_NEW_CODE` 广播原本是在 `HistoryProvider.insert` 内部发出的，insert 没到达 provider，
+    广播就永不触发，于是邮件/Voice 的剪贴板 / Toast / 注入全都不生效（只有和 `com.android.phone`
+    同进程直调的 SMS 路径可用）。`android:forceQueryable` 对普通用户安装的应用不被系统采纳。
+  - 修复：邮件/Voice 的 `NotificationHook` 改为把验证码**直接定向广播给 `com.android.phone`**
+    （forceQueryable 的平台 system app，对任意进程可见），由 `PhoneBroadcastHook` 统一做副作用
+    （剪贴板 / Toast / 注入——都需 uid 1001 特权）**并代为落库**（system app 不受包可见性过滤，
+    能正常 acquire 本 provider）。
+  - 安全：发送方是第三方 app 进程、拿不到本模块签名级权限，故不再用 signature 权限限定广播，
+    改为「编译期内置令牌 `IPC_TOKEN` + 显式 `setPackage` 定向投递」，接收方校验令牌后才动手，
+    挡掉第三方伪造广播驱动按键注入 / 截获验证码。
 - **v0.3.1** — 修复 & 加固：
   - 修复同一条短信被重复注入的问题（`InboundSmsHandler.dispatchIntent` 会为
     `SMS_DELIVER` / `SMS_RECEIVED` 各派发一次，个别 OEM 子类重写还会再多一次，

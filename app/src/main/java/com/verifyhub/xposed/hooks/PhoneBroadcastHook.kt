@@ -70,14 +70,14 @@ class PhoneBroadcastHook {
     private fun register(ctx: Context) {
         try {
             val filter = IntentFilter(HistoryProvider.ACTION_NEW_CODE)
-            // 必须 EXPORTED：发送方 com.verifyhub 与本进程 com.android.phone 是不同 UID。
-            // 但裸 EXPORTED 会让任意应用广播 ACTION_NEW_CODE，从这个 uid=1001 特权进程
-            // 触发剪贴板写入与「按键注入」——等于把任意文本打进当前输入框。用签名级
-            // 权限把发送方限定为持有本模块签名的 com.verifyhub 自己。
+            // 必须 EXPORTED：发送方是 Gmail / Outlook / Voice 进程（NotificationHook），与本进程
+            // com.android.phone 是不同 UID。这些第三方 app 进程无法持有本模块的签名级权限，所以
+            // 不能用签名权限限定发送方；改为在 onReceive 里校验广播携带的编译期内置令牌
+            // (HistoryProvider.IPC_TOKEN) + 依赖发送方的显式 setPackage 定向投递，挡掉第三方伪造。
             ctx.registerReceiver(
                 receiver,
                 filter,
-                HistoryProvider.PERMISSION_NEW_CODE,
+                null,
                 null,
                 Context.RECEIVER_EXPORTED,
             )
@@ -91,18 +91,56 @@ class PhoneBroadcastHook {
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val action = intent?.action
+            val token = intent?.getStringExtra(HistoryProvider.EXTRA_TOKEN)
             val value = intent?.getStringExtra(HistoryProvider.EXTRA_VALUE)
             val kind = intent?.getStringExtra(HistoryProvider.EXTRA_KIND)
             Logger.i("PhoneBroadcastHook.onReceive action=$action valueLen=${value?.length} kind=$kind")
 
             if (action != HistoryProvider.ACTION_NEW_CODE) return
+            // 校验令牌：挡掉第三方 app 伪造 ACTION_NEW_CODE 来驱动按键注入 / 截获验证码。
+            if (token != HistoryProvider.IPC_TOKEN) {
+                Logger.w("PhoneBroadcastHook: reject broadcast with bad/absent token")
+                return
+            }
             value ?: return
             kind ?: return
             val ctx = context ?: return
 
+            val source = intent.getStringExtra(HistoryProvider.EXTRA_SOURCE) ?: "UNKNOWN"
+            val sender = intent.getStringExtra(HistoryProvider.EXTRA_SENDER)
+            val preview = intent.getStringExtra(HistoryProvider.EXTRA_PREVIEW)
+
             sideEffects(ctx, value, kind)
+
+            // 邮件 / Voice 路径的落库也在这里代办：抓取进程（Gmail/Outlook/Voice）看不到本模块
+            // 的 provider，而 com.android.phone 是 system app 不受包可见性过滤，能正常 insert。
+            insertHistory(ctx, value, kind, source, sender, preview)
             // SMS 标已读 + 抑制默认信息 App 通知的逻辑在 SmsHook 里：拦截 dispatchIntent
             // 不向默认信息 App 派发，并自己 insert 一行 read=1 的 inbox 记录。
+        }
+    }
+
+    /** 代邮件/Voice 路径把验证码落库到本模块 provider（本进程能 acquire 到）。放 worker 线程做。 */
+    private fun insertHistory(
+        ctx: Context,
+        value: String,
+        kind: String,
+        source: String,
+        sender: String?,
+        preview: String?,
+    ) {
+        worker.post {
+            runCatching {
+                val cv = android.content.ContentValues().apply {
+                    put(HistoryProvider.COL_VALUE, value)
+                    put(HistoryProvider.COL_KIND, kind)
+                    put(HistoryProvider.COL_SOURCE, source)
+                    put(HistoryProvider.COL_SENDER, sender)
+                    put(HistoryProvider.COL_PREVIEW, preview.orEmpty().take(280))
+                    put(HistoryProvider.COL_TIMESTAMP, System.currentTimeMillis())
+                }
+                ctx.contentResolver.insert(HistoryProvider.URI, cv)
+            }.onFailure { Logger.w("PhoneBroadcastHook: history insert failed", it) }
         }
     }
 
